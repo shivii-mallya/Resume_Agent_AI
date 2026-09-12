@@ -1,5 +1,5 @@
 import streamlit as st
-from agent import create_initial_plan
+from agent import create_initial_plan, execute_action
 
 st.set_page_config(
     page_title="ResumeAgent AI",
@@ -74,3 +74,72 @@ if st.button("🚀 Start Application Agent", type="primary"):
                 f"**Action:** {action['action']}\n\n"
                 f"**Reason:** {action['reason']}"
             )
+            st.write("### ⚙️ Executing Action")
+
+            with st.spinner("🔎 Agent is executing its selected action..."):
+                action_result = execute_action(
+                    action,
+                    job_description,
+                    candidate_profile
+                )
+
+            if action_result["action"] == "research_role":
+
+                st.success(
+                    f"Search completed: {action_result['query']}"
+                )
+
+                st.write("### 📚 Research Results")
+
+                for i, result in enumerate(
+                    action_result["results"], start=1
+                ):
+                    st.write(f"**{i}. {result['title']}**")
+                    st.write(result["content"][:500])
+                    st.write(f"🔗 {result['url']}")
+                    st.divider()
+
+            elif action_result["action"] == "evaluate_match":
+
+                evaluation = action_result["evaluation"]
+
+                if "error" in evaluation:
+                    st.error(evaluation["error"])
+                    st.code(evaluation["raw_response"])
+
+                else:
+                    st.write("### 📊 Match Evaluation")
+
+                    st.metric(
+                        "Overall Match",
+                        f"{evaluation['match_score']}%"
+                    )
+
+                    st.write("#### ✅ Strong Matches")
+
+                    for item in evaluation["strong_matches"]:
+                        st.write(f"- {item}")
+
+                    st.write("#### ⚠️ Weak Matches")
+
+                    for item in evaluation["weak_matches"]:
+                        st.write(f"- {item}")
+
+                    st.write("#### 🔎 Evidence Gaps")
+
+                    for item in evaluation["evidence_gaps"]:
+                        st.write(f"- {item}")
+
+                    if evaluation["needs_more_information"]:
+                        st.warning(
+                            f"🔄 More information is needed. "
+                            f"{evaluation['reason']}"
+                        )
+                    else:
+                        st.success(
+                            f"✅ Evidence appears sufficient. "
+                            f"{evaluation['reason']}"
+                        )
+
+            else:
+                st.info(action_result["message"])
