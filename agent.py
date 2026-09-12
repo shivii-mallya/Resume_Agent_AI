@@ -74,12 +74,19 @@ def execute_action(action, job_description, candidate_profile):
     action_type = action.get("action")
 
     if action_type == "research_role":
-        query = (
-            f"requirements skills expectations for "
-            f"{job_description[:500]}"
-        )
 
-        results = search_web(query, max_results=5)
+        query = action.get("search_query")
+
+        if not query:
+            query = (
+                "software engineering internship skills "
+                "requirements and expectations"
+            )
+
+        results = search_web(
+            query,
+            max_results=5
+        )
 
         return {
             "action": "research_role",
@@ -165,3 +172,254 @@ Return ONLY valid JSON in this format:
             "error": "The LLM did not return valid JSON.",
             "raw_response": response
         }
+def decide_next_action(
+    job_description,
+    candidate_profile,
+    previous_actions,
+    latest_result
+):
+    """
+    Decide what the agent should do next based on
+    the current state and the latest result.
+    """
+
+    prompt = f"""
+You are the decision-making component of an autonomous
+resume and job application agent.
+
+Your ultimate goal is:
+
+Prepare the strongest truthful application possible for
+the target job using only evidence that can be supported.
+
+TARGET JOB DESCRIPTION:
+{job_description}
+
+CANDIDATE PROFILE:
+{candidate_profile}
+
+ACTIONS ALREADY TAKEN:
+{previous_actions}
+
+LATEST RESULT:
+{latest_result}
+
+Available actions:
+
+1. research_role
+   Use web search when more information about the role,
+   company, industry expectations, or relevant skills is needed.
+
+2. evaluate_match
+   Compare the candidate's evidence against the job requirements.
+
+3. generate_resume
+   Generate a tailored resume when there is enough information.
+
+4. finish
+   Finish when the available evidence is sufficient and
+   the application is ready for the next stage.
+
+IMPORTANT:
+- Do not invent candidate experience.
+- Do not claim the candidate has a skill unless supported
+  by the candidate profile or verified evidence.
+- If important information is missing, choose an action
+  that can help resolve the gap.
+- Do not repeatedly perform the same action without a reason.
+- Make the decision based on the latest result.
+
+Return ONLY valid JSON:
+
+{{
+    "decision": "research_role",
+    "reason": "why this action is the best next step",
+    "search_query": "search query if research_role is selected, otherwise empty"
+}}
+
+The decision MUST be exactly one of:
+
+research_role
+evaluate_match
+generate_resume
+finish
+"""
+
+    response = ask_llm(prompt)
+
+    try:
+        return json.loads(response)
+
+    except json.JSONDecodeError:
+        return {
+            "error": "The LLM did not return valid JSON.",
+            "raw_response": response
+        }
+
+def run_agent_loop(
+    job_description,
+    candidate_profile,
+    max_iterations=3
+):
+    """
+    Run the autonomous decision/action/evaluation loop.
+    """
+
+    trace = []
+
+    # ---------------------------------------
+    # STEP 1: Initial planning
+    # ---------------------------------------
+
+    plan = create_initial_plan(
+        job_description,
+        candidate_profile
+    )
+
+    if "error" in plan:
+        return {
+            "error": plan["error"],
+            "trace": trace
+        }
+
+    current_action = plan["next_action"]
+
+    trace.append({
+        "stage": "initial_decision",
+        "data": plan
+    })
+
+    previous_actions = []
+
+    # ---------------------------------------
+    # STEP 2: Autonomous loop
+    # ---------------------------------------
+
+    for iteration in range(max_iterations):
+
+        action_type = current_action.get("action")
+
+        previous_actions.append(action_type)
+
+        trace.append({
+            "stage": "decision",
+            "iteration": iteration + 1,
+            "action": current_action
+        })
+
+        # Execute the selected action
+        action_result = execute_action(
+            current_action,
+            job_description,
+            candidate_profile
+        )
+
+        trace.append({
+            "stage": "action_result",
+            "iteration": iteration + 1,
+            "result": action_result
+        })
+
+        # ---------------------------------------
+        # Evaluate match when selected
+        # ---------------------------------------
+
+        if action_type == "evaluate_match":
+
+            evaluation = evaluate_match(
+                job_description,
+                candidate_profile
+            )
+
+            action_result["evaluation"] = evaluation
+
+            trace.append({
+                "stage": "evaluation",
+                "iteration": iteration + 1,
+                "evaluation": evaluation
+            })
+
+            latest_result = evaluation
+
+        else:
+
+            latest_result = action_result
+
+        # ---------------------------------------
+        # Stop if agent chooses to finish
+        # ---------------------------------------
+
+        if action_type == "finish":
+
+            trace.append({
+                "stage": "finished",
+                "iteration": iteration + 1
+            })
+
+            break
+
+        # ---------------------------------------
+        # Ask agent what to do next
+        # ---------------------------------------
+
+        next_decision = decide_next_action(
+            job_description,
+            candidate_profile,
+            previous_actions,
+            latest_result
+        )
+
+        trace.append({
+            "stage": "adaptation",
+            "iteration": iteration + 1,
+            "decision": next_decision
+        })
+
+        if "error" in next_decision:
+            break
+
+        current_action = {
+            "action": next_decision["decision"],
+            "reason": next_decision["reason"],
+            "search_query": next_decision.get(
+                "search_query",
+                ""
+            )
+        }
+
+    return {
+        "plan": plan,
+        "trace": trace
+    }
+
+if __name__ == "__main__":
+
+    test_job = """
+    Software Engineering Intern.
+
+    Requirements:
+    Python, REST APIs, SQL, Git, problem solving,
+    software development projects.
+    """
+
+    test_candidate = """
+    Second-year Computer Science student.
+
+    Skills:
+    Python, C++, SQL, Git, GitHub, Streamlit.
+
+    Projects:
+    Built a voice-based task management application
+    using Python, Streamlit, SQLite and an LLM API.
+
+    Built an ESP32 gas monitoring system with a Python dashboard.
+    """
+
+    result = run_agent_loop(
+        test_job,
+        test_candidate
+    )
+
+    for item in result["trace"]:
+        print("\n" + "=" * 60)
+        print(item)
