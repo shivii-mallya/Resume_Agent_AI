@@ -1,5 +1,107 @@
 import streamlit as st
-from agent import create_initial_plan, execute_action,run_agent_loop
+from io import BytesIO
+from reportlab.lib.pagesizes import A4
+from reportlab.pdfgen import canvas
+
+from agent import create_initial_plan, execute_action, run_agent_loop
+
+def create_resume_pdf(resume):
+    """Create a simple PDF from the generated resume."""
+
+    buffer = BytesIO()
+
+    pdf = canvas.Canvas(buffer, pagesize=A4)
+
+    width, height = A4
+    y = height - 50
+
+    def write_line(text, size=10, gap=16):
+        nonlocal y
+
+        if y < 50:
+            pdf.showPage()
+            y = height - 50
+
+        pdf.setFont("Helvetica", size)
+
+        # Keep long text within the page
+        words = str(text).split()
+        line = ""
+
+        for word in words:
+            test_line = line + " " + word
+
+            if pdf.stringWidth(test_line, "Helvetica", size) > width - 80:
+                pdf.drawString(40, y, line)
+                y -= gap
+                line = word
+            else:
+                line = test_line
+
+        if line:
+            pdf.drawString(40, y, line)
+            y -= gap
+
+    # Name
+    write_line(resume["name"], 18, 24)
+
+    # Headline
+    write_line(resume["headline"], 11, 18)
+
+    y -= 8
+
+    # Summary
+    write_line("PROFESSIONAL SUMMARY", 13, 20)
+    write_line(resume["summary"], 10, 15)
+
+    y -= 8
+
+    # Skills
+    write_line("SKILLS", 13, 20)
+    write_line(", ".join(resume["skills"]), 10, 15)
+
+    y -= 8
+
+    # Projects
+    write_line("PROJECTS", 13, 20)
+
+    for project in resume["projects"]:
+        write_line(project["name"], 11, 17)
+        write_line(project["description"], 10, 15)
+
+    y -= 8
+
+    # Experience
+    write_line("EXPERIENCE", 13, 20)
+
+    for experience in resume["experience"]:
+        write_line(
+            f"{experience['title']} — "
+            f"{experience['organization']}",
+            11,
+            17
+        )
+        write_line(experience["description"], 10, 15)
+
+    y -= 8
+
+    # Education
+    write_line("EDUCATION", 13, 20)
+
+    for education in resume["education"]:
+        write_line(
+            f"{education['degree']} — "
+            f"{education['institution']}",
+            11,
+            17
+        )
+        write_line(education["details"], 10, 15)
+
+    pdf.save()
+
+    buffer.seek(0)
+
+    return buffer
 
 st.set_page_config(
     page_title="ResumeAgent AI",
@@ -275,4 +377,12 @@ if st.button("🚀 Start Application Agent", type="primary"):
 
                             st.success(
                                 "✅ Resume generated successfully."
+                            )
+                            pdf_file = create_resume_pdf(resume)
+
+                            st.download_button(
+                                label="⬇️ Download Resume as PDF",
+                                data=pdf_file,
+                                file_name="tailored_resume.pdf",
+                                mime="application/pdf"
                             )
