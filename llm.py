@@ -14,14 +14,15 @@ client = Groq(api_key=api_key)
 
 def ask_llm(prompt):
     response = client.chat.completions.create(
-        model="openai/gpt-oss-120b",
+        model="openai/gpt-oss-20b",
         messages=[
             {
                 "role": "user",
                 "content": prompt
             }
         ],
-        temperature=0.2
+        temperature=0.2,
+        max_tokens=1000
     )
 
     return response.choices[0].message.content

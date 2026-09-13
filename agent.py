@@ -111,6 +111,18 @@ def execute_action(action, job_description, candidate_profile):
             "action": "evaluate_match",
             "evaluation": evaluation
         }
+    elif action_type == "generate_resume":
+
+        resume = generate_resume(
+            job_description,
+            candidate_profile,
+            candidate_profile
+        )
+
+        return {
+            "action": "generate_resume",
+            "resume": resume
+        }
 
     elif action_type == "finish":
         return {
@@ -176,7 +188,8 @@ def decide_next_action(
     job_description,
     candidate_profile,
     previous_actions,
-    latest_result
+    latest_result,
+    iteration 
 ):
     """
     Decide what the agent should do next based on
@@ -259,7 +272,7 @@ finish
 def run_agent_loop(
     job_description,
     candidate_profile,
-    max_iterations=3
+    max_iterations=5
 ):
     """
     Run the autonomous decision/action/evaluation loop.
@@ -301,13 +314,17 @@ def run_agent_loop(
 
         previous_actions.append(action_type)
 
+        # Show decision
         trace.append({
             "stage": "decision",
             "iteration": iteration + 1,
             "action": current_action
         })
 
-        # Execute the selected action
+        # ---------------------------------------
+        # Execute action
+        # ---------------------------------------
+
         action_result = execute_action(
             current_action,
             job_description,
@@ -321,17 +338,14 @@ def run_agent_loop(
         })
 
         # ---------------------------------------
-        # Evaluate match when selected
+        # Evaluate match
         # ---------------------------------------
 
         if action_type == "evaluate_match":
 
-            evaluation = evaluate_match(
-                job_description,
-                candidate_profile
+            evaluation = action_result.get(
+                "evaluation"
             )
-
-            action_result["evaluation"] = evaluation
 
             trace.append({
                 "stage": "evaluation",
@@ -341,19 +355,97 @@ def run_agent_loop(
 
             latest_result = evaluation
 
+        # ---------------------------------------
+        # Resume generated
+        # ---------------------------------------
+
+        elif action_type == "generate_resume":
+
+            resume = action_result.get(
+                "resume"
+            )
+
+            trace.append({
+                "stage": "resume_generated",
+                "iteration": iteration + 1,
+                "resume": resume
+            })
+
+            trace.append({
+                "stage": "finished",
+                "iteration": iteration + 1
+            })
+
+            break
+
+        # ---------------------------------------
+        # Agent chose finish
+        # ---------------------------------------
+
+        elif action_type == "finish":
+
+            trace.append({
+                "stage": "finished",
+                "iteration": iteration + 1
+            })
+
+            break
+
+        # ---------------------------------------
+        # Other actions
+        # ---------------------------------------
+
         else:
 
             latest_result = action_result
 
         # ---------------------------------------
-        # Stop if agent chooses to finish
+        # If this was the FINAL iteration,
+        # generate the resume directly.
         # ---------------------------------------
 
-        if action_type == "finish":
+        if iteration == max_iterations - 1:
+
+            final_action = {
+                "action": "generate_resume",
+                "reason": (
+                    "The agent has completed the maximum "
+                    "number of research/evaluation iterations. "
+                    "Generate the best truthful resume using "
+                    "the available candidate evidence."
+                ),
+                "search_query": ""
+            }
+
+            trace.append({
+                "stage": "decision",
+                "iteration": iteration + 2,
+                "action": final_action
+            })
+
+            final_result = execute_action(
+                final_action,
+                job_description,
+                candidate_profile
+            )
+
+            trace.append({
+                "stage": "action_result",
+                "iteration": iteration + 2,
+                "result": final_result
+            })
+
+            trace.append({
+                "stage": "resume_generated",
+                "iteration": iteration + 2,
+                "resume": final_result.get(
+                    "resume"
+                )
+            })
 
             trace.append({
                 "stage": "finished",
-                "iteration": iteration + 1
+                "iteration": iteration + 2
             })
 
             break
@@ -366,7 +458,8 @@ def run_agent_loop(
             job_description,
             candidate_profile,
             previous_actions,
-            latest_result
+            latest_result,
+            iteration + 1
         )
 
         trace.append({
@@ -377,6 +470,10 @@ def run_agent_loop(
 
         if "error" in next_decision:
             break
+
+        # ---------------------------------------
+        # Set next action
+        # ---------------------------------------
 
         current_action = {
             "action": next_decision["decision"],
@@ -392,34 +489,76 @@ def run_agent_loop(
         "trace": trace
     }
 
-if __name__ == "__main__":
-
-    test_job = """
-    Software Engineering Intern.
-
-    Requirements:
-    Python, REST APIs, SQL, Git, problem solving,
-    software development projects.
+def generate_resume(job_description, candidate_profile, research_context):
+    """
+    Generate a tailored resume using only truthful candidate evidence.
     """
 
-    test_candidate = """
-    Second-year Computer Science student.
+    prompt = f"""
+        You are an expert resume writer.
 
-    Skills:
-    Python, C++, SQL, Git, GitHub, Streamlit.
+        Create a truthful, job-tailored resume using ONLY the candidate information provided.
 
-    Projects:
-    Built a voice-based task management application
-    using Python, Streamlit, SQLite and an LLM API.
+        JOB DESCRIPTION:
+        {job_description}
 
-    Built an ESP32 gas monitoring system with a Python dashboard.
-    """
+        CANDIDATE PROFILE:
+        {candidate_profile}
 
-    result = run_agent_loop(
-        test_job,
-        test_candidate
-    )
+        RULES:
+        - Never invent experience, companies, projects, skills, degrees, dates, or achievements.
+        - Prioritize skills relevant to the job description.
+        - Keep the resume concise.
+        - Return ONLY valid JSON.
+        - Do NOT use Markdown.
+        - Do NOT use ``` fences.
+        - Do NOT add explanations before or after the JSON.
 
-    for item in result["trace"]:
-        print("\n" + "=" * 60)
-        print(item)
+        Return exactly this JSON structure:
+
+        {{
+            "name": "candidate name",
+            "headline": "short professional headline",
+            "summary": "short professional summary",
+            "skills": ["skill 1", "skill 2", "skill 3"],
+            "projects": [
+                {{
+                    "name": "project name",
+                    "description": "short truthful description"
+                }}
+            ],
+            "experience": [
+                {{
+                    "title": "role",
+                    "organization": "organization",
+                    "description": "short truthful description"
+                }}
+            ],
+            "education": [
+                {{
+                    "degree": "degree",
+                    "institution": "institution",
+                    "details": "relevant details"
+                }}
+            ]
+}}
+"""
+    response = ask_llm(prompt)
+    
+    try:
+        cleaned_response = response.strip()
+
+        if cleaned_response.startswith("```"):
+            cleaned_response = cleaned_response.replace(
+                "```json", ""
+            ).replace(
+                "```", ""
+            ).strip()
+
+        return json.loads(cleaned_response)
+
+    except json.JSONDecodeError:
+        return {
+            "error": "The LLM did not return valid JSON.",
+            "raw_response": response
+        }
