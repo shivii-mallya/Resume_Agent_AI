@@ -90,6 +90,8 @@ The agent is designed to use only information provided about the candidate and d
                                  │ Downloadable PDF│
                                  └─────────────────┘
 
+```
+
 ✨ Features
 Autonomous Decision Making
 
